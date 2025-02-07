@@ -12,6 +12,7 @@ type Session struct {
 	GlobalRequest <-chan *ssh.Request
 	Listener      net.Listener
 	TunnelType    TunnelType
+	ForwardedPort uint16
 	Done          chan bool
 }
 

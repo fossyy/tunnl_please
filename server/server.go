@@ -1,12 +1,14 @@
 package server
 
 import (
+	"crypto/tls"
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"log"
 	"net"
 	"net/http"
 	httpServer "tunnel_pls/http"
+	"tunnel_pls/utils"
 )
 
 type Server struct {
@@ -22,6 +24,15 @@ func NewServer(config ssh.ServerConfig) *Server {
 		return nil
 	}
 	go httpServer.Listen()
+	if utils.Getenv("tls_enabled") == "true" {
+		cert, err := tls.LoadX509KeyPair(utils.Getenv("cert_loc"), utils.Getenv("key_loc"))
+		if err != nil {
+			log.Fatal("Failed to load key pair:", err)
+		}
+
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+		go httpServer.ListenTLS(tlsConfig)
+	}
 	return &Server{
 		Conn:   &listener,
 		Config: &config,

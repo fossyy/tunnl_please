@@ -45,6 +45,7 @@ func (s *Session) handleGlobalRequest() {
 
 				if portToBind == 80 || portToBind == 443 {
 					s.TunnelType = HTTP
+					s.ForwardedPort = uint16(portToBind)
 					var slug string
 					for {
 						slug = utils.GenerateRandomString(32)
@@ -57,7 +58,11 @@ func (s *Session) handleGlobalRequest() {
 					buf := new(bytes.Buffer)
 					binary.Write(buf, binary.BigEndian, uint32(portToBind))
 					log.Printf("Forwarding approved on port: %d", portToBind)
-					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.%s \r\n", slug, utils.Getenv("domain"))))
+					if utils.Getenv("tls_enabled") == "true" {
+						s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to https://%s.%s \r\n", slug, utils.Getenv("domain"))))
+					} else {
+						s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.%s \r\n", slug, utils.Getenv("domain"))))
+					}
 					req.Reply(true, buf.Bytes())
 				} else {
 					s.TunnelType = TCP

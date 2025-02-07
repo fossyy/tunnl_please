@@ -127,15 +127,19 @@ func handleRequest(conn net.Conn) {
 		return
 	}
 
-	if r.Host == utils.Getenv("domain") {
-		writer := &tcpResponseWriter{
-			conn:   conn,
-			header: make(http.Header),
-			status: http.StatusOK,
-		}
-		fmt.Println(r.Pattern)
-		router.ServeHTTP(writer, r)
+	writer := &tcpResponseWriter{
+		conn:   conn,
+		header: make(http.Header),
+		status: http.StatusOK,
+	}
 
+	if r.Host == utils.Getenv("domain") {
+		router.ServeHTTP(writer, r)
+		return
+	}
+
+	if utils.Getenv("tls_enabled") == "false" {
+		http.Redirect(writer, r, fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI()), http.StatusFound)
 		return
 	}
 
