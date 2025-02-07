@@ -50,8 +50,9 @@ func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh
 
 func (session *Session) Close() {
 	session.Done <- true
-
-	session.Listener.Close()
+	if session.TunnelType != HTTP {
+		session.Listener.Close()
+	}
 
 	for _, ch := range session.ConnChannels {
 		if err := ch.Close(); err != nil {

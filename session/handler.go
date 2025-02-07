@@ -57,7 +57,7 @@ func (s *Session) handleGlobalRequest() {
 					buf := new(bytes.Buffer)
 					binary.Write(buf, binary.BigEndian, uint32(portToBind))
 					log.Printf("Forwarding approved on port: %d", portToBind)
-					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.tunnl.live", slug)))
+					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.tunnl.live \r\n", slug)))
 					req.Reply(true, buf.Bytes())
 				} else {
 					s.TunnelType = TCP
@@ -70,6 +70,7 @@ func (s *Session) handleGlobalRequest() {
 						continue
 					}
 					s.Listener = listener
+					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to tunnl.live:%d \r\n", portToBind)))
 					go func() {
 						for {
 							conn, err := listener.Accept()
@@ -255,7 +256,7 @@ func (s *Session) HandleForwardedConnection(conn net.Conn, sshConn *ssh.ServerCo
 	}()
 }
 
-func (s *Session) GetForwardedConnection(conn net.Conn, host string, sshConn *ssh.ServerConn, payload []byte, originPort, port uint32) {
+func (s *Session) GetForwardedConnection(conn net.Conn, host string, sshConn *ssh.ServerConn, payload []byte, originPort, port uint32, path, method, proto string) {
 	defer conn.Close()
 	channelPayload := createForwardedTCPIPPayload(host, originPort, port)
 	channel, reqs, err := sshConn.OpenChannel("forwarded-tcpip", channelPayload)
@@ -277,6 +278,7 @@ func (s *Session) GetForwardedConnection(conn net.Conn, host string, sshConn *ss
 		s.ConnChannels[0].Write([]byte("Could not forward request to the tunnel addr\r\n"))
 		return
 	} else {
+		s.ConnChannels[0].Write([]byte(fmt.Sprintf("\033[32m %s -- [%s] \"%s %s %s\" 	\r\n \033[0m", host, time.Now().Format("02/Jan/2006 15:04:05"), method, path, proto)))
 		io.Copy(conn, reader)
 	}
 	go func() {
