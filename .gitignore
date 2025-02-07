@@ -2,3 +2,4 @@ id_rsa*
 *.pub
 .idea
 .env
+tmp

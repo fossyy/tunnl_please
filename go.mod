@@ -3,7 +3,7 @@ module tunnel_pls
 go 1.23
 
 require (
-	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
+	github.com/a-h/templ v0.3.833
 	golang.org/x/crypto v0.32.0
 )
 
