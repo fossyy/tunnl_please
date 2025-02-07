@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"tunnel_pls/session"
+	"tunnel_pls/utils"
 	indexView "tunnel_pls/view/index"
 )
 
@@ -86,7 +87,7 @@ func Listen() {
 	}
 
 	router.HandleFunc("GET", "/", func(w http.ResponseWriter, r *http.Request) {
-		indexView.Main("Main Page").Render(r.Context(), w)
+		indexView.Main("Main Page", utils.Getenv("domain")).Render(r.Context(), w)
 		return
 	})
 
@@ -126,7 +127,7 @@ func handleRequest(conn net.Conn) {
 		return
 	}
 
-	if r.Host == "localhost" {
+	if r.Host == utils.Getenv("domain") {
 		writer := &tcpResponseWriter{
 			conn:   conn,
 			header: make(http.Header),

@@ -57,7 +57,7 @@ func (s *Session) handleGlobalRequest() {
 					buf := new(bytes.Buffer)
 					binary.Write(buf, binary.BigEndian, uint32(portToBind))
 					log.Printf("Forwarding approved on port: %d", portToBind)
-					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.tunnl.live \r\n", slug)))
+					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.%s \r\n", slug, utils.Getenv("domain"))))
 					req.Reply(true, buf.Bytes())
 				} else {
 					s.TunnelType = TCP
@@ -70,7 +70,7 @@ func (s *Session) handleGlobalRequest() {
 						continue
 					}
 					s.Listener = listener
-					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to tunnl.live:%d \r\n", portToBind)))
+					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to %s:%d \r\n", utils.Getenv("domain"), portToBind)))
 					go func() {
 						for {
 							conn, err := listener.Accept()
