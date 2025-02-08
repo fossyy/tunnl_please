@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
 	"time"
 	"tunnel_pls/proto"
@@ -291,6 +292,37 @@ func (s *Session) GetForwardedConnection(conn net.Conn, host string, sshConn *ss
 			req.Reply(false, nil)
 		}
 	}()
+}
+
+func (s *Session) GetForwardedConnectionTLS(host string, sshConn *ssh.ServerConn, payload []byte, originPort, port uint32, path, method, proto string) *http.Response {
+	channelPayload := createForwardedTCPIPPayload(host, originPort, port)
+	channel, reqs, err := sshConn.OpenChannel("forwarded-tcpip", channelPayload)
+	if err != nil {
+		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
+		return nil
+	}
+	defer channel.Close()
+
+	initalPayload := bytes.NewReader(payload)
+	io.Copy(channel, initalPayload)
+
+	go func() {
+		for req := range reqs {
+			req.Reply(false, nil)
+		}
+	}()
+
+	reader := bufio.NewReader(channel)
+	_, err = reader.Peek(1)
+	if err == io.EOF {
+		s.ConnChannels[0].Write([]byte("Could not forward request to the tunnel addr\r\n"))
+		return nil
+	} else {
+		s.ConnChannels[0].Write([]byte(fmt.Sprintf("\033[32m %s -- [%s] \"%s %s %s\" 	\r\n \033[0m", host, time.Now().Format("02/Jan/2006 15:04:05"), method, path, proto)))
+		response, _ := http.ReadResponse(reader, nil)
+		return response
+	}
+
 }
 
 func writeSSHString(buffer *bytes.Buffer, str string) {

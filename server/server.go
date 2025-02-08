@@ -30,7 +30,7 @@ func NewServer(config ssh.ServerConfig) *Server {
 			log.Fatal("Failed to load key pair:", err)
 		}
 
-		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{"h2"}}
 		go httpServer.ListenTLS(tlsConfig)
 	}
 	return &Server{
