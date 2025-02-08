@@ -56,6 +56,7 @@ func (s *Session) handleGlobalRequest() {
 						break
 					}
 					Clients[slug] = s
+					s.Slug = slug
 					buf := new(bytes.Buffer)
 					binary.Write(buf, binary.BigEndian, uint32(portToBind))
 					log.Printf("Forwarding approved on port: %d", portToBind)

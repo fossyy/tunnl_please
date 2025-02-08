@@ -2,11 +2,14 @@ package session
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 	"net"
 )
 
 type Session struct {
+	ID            uuid.UUID
+	Slug          string
 	ConnChannels  []ssh.Channel
 	Connection    *ssh.ServerConn
 	GlobalRequest <-chan *ssh.Request
@@ -33,6 +36,8 @@ func init() {
 
 func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh.Request) *Session {
 	session := &Session{
+		ID:            uuid.New(),
+		Slug:          "",
 		ConnChannels:  []ssh.Channel{},
 		Connection:    conn,
 		GlobalRequest: req,
@@ -53,6 +58,8 @@ func (session *Session) Close() {
 	session.Done <- true
 	if session.TunnelType != HTTP {
 		session.Listener.Close()
+	} else {
+		delete(Clients, session.Slug)
 	}
 
 	for _, ch := range session.ConnChannels {
