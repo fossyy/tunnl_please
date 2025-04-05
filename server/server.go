@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"tunnel_pls/utils"
 )
 
 type Server struct {
@@ -19,6 +20,17 @@ func NewServer(config ssh.ServerConfig) *Server {
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
 		return nil
+	}
+	if utils.Getenv("tls_enabled") == "true" {
+		go func() {
+			err := NewHTTPSServer()
+			if err != nil {
+				if err != nil {
+					log.Fatalf("failed to start https server: %v", err)
+				}
+				return
+			}
+		}()
 	}
 	go func() {
 		err := NewHTTPServer()

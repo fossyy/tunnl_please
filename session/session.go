@@ -7,9 +7,17 @@ import (
 	"net"
 )
 
+type STATUS string
+
+const (
+	RUNNING STATUS = "running"
+	SETUP   STATUS = "setup"
+)
+
 type Session struct {
 	ID               uuid.UUID
 	Slug             string
+	Status           STATUS
 	ConnChannels     []ssh.Channel
 	Connection       *ssh.ServerConn
 	GlobalRequest    <-chan *ssh.Request
@@ -18,6 +26,7 @@ type Session struct {
 	ForwardedPort    uint16
 	Done             chan bool
 	ForwardedChannel ssh.Channel
+	SlugChannel      chan bool
 }
 
 type TunnelType string
@@ -38,11 +47,13 @@ func init() {
 func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh.Request) *Session {
 	session := &Session{
 		ID:            uuid.New(),
+		Status:        SETUP,
 		Slug:          "",
 		ConnChannels:  []ssh.Channel{},
 		Connection:    conn,
 		GlobalRequest: req,
 		TunnelType:    UNKNOWN,
+		SlugChannel:   make(chan bool),
 		Done:          make(chan bool),
 	}
 
@@ -69,7 +80,6 @@ func (session *Session) Close() {
 			continue
 		}
 	}
-
 	if err := session.Connection.Close(); err != nil {
 		fmt.Println("Error closing connection : ", err.Error())
 	}
