@@ -16,7 +16,7 @@ type Server struct {
 }
 
 func NewServer(config ssh.ServerConfig) *Server {
-	listener, err := net.Listen("tcp", ":2200")
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", utils.Getenv("port")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
 		return nil
@@ -45,7 +45,7 @@ func NewServer(config ssh.ServerConfig) *Server {
 }
 
 func (s *Server) Start() {
-	fmt.Println("SSH server is starting on port 2200...")
+	log.Println("SSH server is starting on port 2200...")
 	for {
 		conn, err := (*s.Conn).Accept()
 		if err != nil {

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"golang.org/x/net/context"
 	"log"
 	"net"
@@ -46,7 +45,7 @@ func HandlerTLS(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	headers, err := peekUntilHeaders(reader, 8192)
 	if err != nil {
-		fmt.Println("Failed to peek headers:", err)
+		log.Println("Failed to peek headers:", err)
 		return
 	}
 

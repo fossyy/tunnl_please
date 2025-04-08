@@ -9,11 +9,15 @@ import (
 
 func main() {
 	sshConfig := &ssh.ServerConfig{
-		NoClientAuth: true,
+		NoClientAuth:  true,
+		ServerVersion: "SSH-2.0-TunnlPls-1.0",
 		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 			return nil, nil
 		},
 	}
+
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	privateBytes, err := os.ReadFile("id_rsa")
 	if err != nil {

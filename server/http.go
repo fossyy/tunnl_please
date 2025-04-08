@@ -46,14 +46,14 @@ func Handler(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	headers, err := peekUntilHeaders(reader, 8192)
 	if err != nil {
-		fmt.Println("Failed to peek headers:", err)
+		log.Println("Failed to peek headers:", err)
 		return
 	}
 
 	host := strings.Split(parseHostFromHeader(headers), ".")
 	if len(host) < 1 {
 		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		fmt.Println("Bad Request")
+		log.Println("Bad Request")
 		conn.Close()
 		return
 	}

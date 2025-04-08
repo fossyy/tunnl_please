@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"golang.org/x/crypto/ssh"
 	"log"
 	"net"
@@ -16,7 +15,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	fmt.Println("SSH connection established:", sshConn.User())
+	log.Println("SSH connection established:", sshConn.User())
 
 	session.New(sshConn, chans, reqs)
 }
