@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 	"tunnel_pls/session"
+	"tunnel_pls/utils"
 )
 
 func NewHTTPSServer() error {
-	cert, err := tls.LoadX509KeyPair("certs/localhost.direct.SS.crt", "certs/localhost.direct.SS.key")
+	cert, err := tls.LoadX509KeyPair(utils.Getenv("cert_loc"), utils.Getenv("key_loc"))
 	if err != nil {
 		return err
 	}

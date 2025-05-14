@@ -25,11 +25,9 @@ func NewServer(config ssh.ServerConfig) *Server {
 		go func() {
 			err := NewHTTPSServer()
 			if err != nil {
-				if err != nil {
-					log.Fatalf("failed to start https server: %v", err)
-				}
-				return
+				log.Fatalf("failed to start https server: %v", err)
 			}
+			return
 		}()
 	}
 	go func() {

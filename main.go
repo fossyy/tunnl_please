@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"tunnel_pls/server"
+	"tunnel_pls/utils"
 )
 
 func main() {
@@ -19,9 +20,9 @@ func main() {
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	privateBytes, err := os.ReadFile("id_rsa")
+	privateBytes, err := os.ReadFile(utils.Getenv("ssh_private_key"))
 	if err != nil {
-		log.Fatal("Failed to load private key (./id_rsa)")
+		log.Fatalf("Failed to load private key : %s", err.Error())
 	}
 
 	private, err := ssh.ParsePrivateKey(privateBytes)
