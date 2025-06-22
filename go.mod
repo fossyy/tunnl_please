@@ -1,6 +1,6 @@
 module tunnel_pls
 
-go 1.23
+go 1.24.4
 
 require (
 	github.com/a-h/templ v0.3.833
@@ -9,8 +9,4 @@ require (
 	golang.org/x/net v0.33.0
 )
 
-require (
-	github.com/google/uuid v1.6.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
-)
+require golang.org/x/sys v0.29.0 // indirect
