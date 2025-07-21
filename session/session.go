@@ -15,19 +15,17 @@ const (
 
 func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh.Request) *Session {
 	session := &Session{
-		Status:        SETUP,
-		Slug:          "",
-		ConnChannels:  []ssh.Channel{},
-		Connection:    conn,
-		GlobalRequest: req,
-		TunnelType:    UNKNOWN,
-		SlugChannel:   make(chan bool),
-		Done:          make(chan bool),
+		Status:      SETUP,
+		Slug:        "",
+		ConnChannel: nil,
+		Connection:  conn,
+		TunnelType:  UNKNOWN,
+		Done:        make(chan bool),
 	}
 
 	go func() {
 		for newChannel := range sshChannel {
-			go session.HandleSessionChannel(newChannel)
+			go session.HandleSessionChannel(newChannel, req)
 		}
 	}()
 
