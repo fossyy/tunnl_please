@@ -48,7 +48,6 @@ type Session struct {
 	ForwardedPort uint16
 	Status        SessionStatus
 	Slug          string
-	SlugChannel   chan bool
 	Done          chan bool
 }
 
@@ -554,7 +553,7 @@ func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.Se
 	}
 	defer channel.Close()
 
-	go handleChannelRequests(reqs, conn, channel, s.SlugChannel)
+	go handleChannelRequests(reqs, conn, channel)
 
 	if conn.Reader == nil {
 		conn.Reader = bufio.NewReader(conn.Writer)
@@ -577,7 +576,7 @@ func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.Se
 	io.Copy(conn.Writer, reader)
 }
 
-func handleChannelRequests(reqs <-chan *ssh.Request, conn UserConnection, channel ssh.Channel, slugChannel <-chan bool) {
+func handleChannelRequests(reqs <-chan *ssh.Request, conn UserConnection, channel ssh.Channel) {
 	select {
 	case <-reqs:
 		for req := range reqs {
@@ -587,11 +586,6 @@ func handleChannelRequests(reqs <-chan *ssh.Request, conn UserConnection, channe
 		conn.Writer.Close()
 		channel.Close()
 		log.Println("Connection closed by timeout")
-		return
-	case <-slugChannel:
-		conn.Writer.Close()
-		channel.Close()
-		log.Println("Connection closed by slug change")
 		return
 	}
 }
