@@ -7,14 +7,61 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"strings"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
+
+	"github.com/gorilla/websocket"
 )
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
+type connResponseWriter struct {
+	conn   net.Conn
+	header http.Header
+	wrote  bool
+}
+
+func (w *connResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *connResponseWriter) WriteHeader(statusCode int) {
+	if w.wrote {
+		return
+	}
+	w.wrote = true
+	fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode))
+	w.header.Write(w.conn)
+	fmt.Fprint(w.conn, "\r\n")
+}
+
+func (w *connResponseWriter) Write(b []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.conn.Write(b)
+}
+
+func (w *connResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	rw := bufio.NewReadWriter(
+		bufio.NewReader(w.conn),
+		bufio.NewWriter(w.conn),
+	)
+	return w.conn, rw, nil
+}
 
 var redirectTLS = false
 
 func NewHTTPServer() error {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
@@ -69,6 +116,40 @@ func Handler(conn net.Conn) {
 			"Connection: close\r\n" +
 			"\r\n"))
 		conn.Close()
+		return
+	}
+
+	if slug == "ping" {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			log.Println("failed to parse HTTP request:", err)
+			return
+		}
+		rw := &connResponseWriter{conn: conn}
+
+		wsConn, err := upgrader.Upgrade(rw, req, nil)
+		if err != nil {
+			if !strings.Contains(err.Error(), "the client is not using the websocket protocol") {
+				log.Println("Upgrade failed:", err)
+			}
+			err := conn.Close()
+			if err != nil {
+				log.Println("failed to close connection:", err)
+				return
+			}
+			return
+		}
+
+		err = wsConn.WriteMessage(websocket.TextMessage, []byte("pong"))
+		if err != nil {
+			log.Println("failed to write pong:", err)
+			return
+		}
+		err = wsConn.Close()
+		if err != nil {
+			log.Println("websocket close failed :", err)
+			return
+		}
 		return
 	}
 

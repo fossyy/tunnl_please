@@ -16,8 +16,9 @@ import (
 	"time"
 	portUtil "tunnel_pls/internal/port"
 
-	"golang.org/x/crypto/ssh"
 	"tunnel_pls/utils"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type SessionStatus string
@@ -27,6 +28,10 @@ const (
 	RUNNING      SessionStatus = "RUNNING"
 	SETUP        SessionStatus = "SETUP"
 )
+
+var forbiddenSlug = []string{
+	"ping",
+}
 
 type UserConnection struct {
 	Reader io.Reader
@@ -409,12 +414,21 @@ func (s *Session) handleSlugEditMode(connection ssh.Channel, inSlugEditMode *boo
 	}
 }
 
+func isForbiddenSlug(slug string) bool {
+	for _, s := range forbiddenSlug {
+		if slug == s {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Session) handleSlugSave(connection ssh.Channel, inSlugEditMode *bool, editSlug *string, commandBuffer *bytes.Buffer) {
 	isValid := isValidSlug(*editSlug)
 
 	connection.Write([]byte("\033[H\033[2J"))
 
-	if isValid {
+	if !isValid {
 		oldSlug := s.Slug
 		newSlug := *editSlug
 
@@ -425,6 +439,11 @@ func (s *Session) handleSlugSave(connection ssh.Channel, inSlugEditMode *bool, e
 
 		connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
 		connection.Write([]byte("Your new address is: " + newSlug + "." + utils.Getenv("domain") + "\r\n\r\n"))
+		connection.Write([]byte("Press any key to continue...\r\n"))
+	} else if isForbiddenSlug(*editSlug) {
+		connection.Write([]byte("\r\n\r\n❌ FORBIDDEN SUBDOMAIN ❌\r\n\r\n"))
+		connection.Write([]byte("This subdomain is not allowed.\r\n"))
+		connection.Write([]byte("Please try a different subdomain.\r\n\r\n"))
 		connection.Write([]byte("Press any key to continue...\r\n"))
 	} else {
 		connection.Write([]byte("\r\n\r\n❌ INVALID SUBDOMAIN ❌\r\n\r\n"))

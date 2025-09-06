@@ -6,9 +6,12 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/http"
 	"strings"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
+
+	"github.com/gorilla/websocket"
 )
 
 func NewHTTPSServer() error {
@@ -61,6 +64,40 @@ func HandlerTLS(conn net.Conn) {
 		return
 	}
 	slug := host[0]
+
+	if slug == "ping" {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			log.Println("failed to parse HTTP request:", err)
+			return
+		}
+		rw := &connResponseWriter{conn: conn}
+
+		wsConn, err := upgrader.Upgrade(rw, req, nil)
+		if err != nil {
+			if !strings.Contains(err.Error(), "the client is not using the websocket protocol") {
+				log.Println("Upgrade failed:", err)
+			}
+			err := conn.Close()
+			if err != nil {
+				log.Println("failed to close connection:", err)
+				return
+			}
+			return
+		}
+
+		err = wsConn.WriteMessage(websocket.TextMessage, []byte("pong"))
+		if err != nil {
+			log.Println("failed to write pong:", err)
+			return
+		}
+		err = wsConn.Close()
+		if err != nil {
+			log.Println("websocket close failed :", err)
+			return
+		}
+		return
+	}
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
