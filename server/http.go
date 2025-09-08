@@ -156,7 +156,7 @@ func Handler(conn net.Conn) {
 	sshSession, ok := session.Clients[slug]
 	if !ok {
 		conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
-			fmt.Sprintf("Location: https://%s/tunnel-not-found?slug=%s\r\n", utils.Getenv("domain"), slug) +
+			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
