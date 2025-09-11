@@ -78,7 +78,7 @@ func NewHTTPServer() error {
 		if isAllowedAllCors {
 			return true
 		} else {
-			isAllowed, ok := allowedCors[r.Host]
+			isAllowed, ok := allowedCors[r.Header.Get("Origin")]
 			if !ok || !isAllowed {
 				return false
 			}
