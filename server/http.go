@@ -71,7 +71,6 @@ func init() {
 			allowedCors[allowedOrigin] = true
 		}
 	}
-	fmt.Println(allowedCors)
 }
 
 func NewHTTPServer() error {
