@@ -271,7 +271,7 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 				}
 				return
 			}
-		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); isExist || isUse {
+		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); isExist && isUse {
 			s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
 			err := req.Reply(false, nil)
 			if err != nil {
