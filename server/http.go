@@ -185,7 +185,7 @@ func Handler(conn net.Conn) {
 	sshSession.HandleForwardedConnection(session.UserConnection{
 		Reader: reader,
 		Writer: conn,
-	}, sshSession.Connection)
+	}, sshSession.Conn)
 	return
 }
 

@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 	portUtil "tunnel_pls/internal/port"
@@ -34,10 +33,10 @@ type UserConnection struct {
 
 var (
 	clientsMutex sync.RWMutex
-	Clients      = make(map[string]*Session)
+	Clients      = make(map[string]*SSHSession)
 )
 
-func registerClient(slug string, session *Session) bool {
+func registerClient(slug string, session *SSHSession) bool {
 	clientsMutex.Lock()
 	defer clientsMutex.Unlock()
 
@@ -56,53 +55,35 @@ func unregisterClient(slug string) {
 	delete(Clients, slug)
 }
 
-func updateClientSlug(oldSlug, newSlug string) bool {
-	clientsMutex.Lock()
-	defer clientsMutex.Unlock()
-
-	if _, exists := Clients[newSlug]; exists && newSlug != oldSlug {
-		return false
-	}
-
-	client, ok := Clients[oldSlug]
-	if !ok {
-		return false
-	}
-
-	delete(Clients, oldSlug)
-	client.Slug = newSlug
-	Clients[newSlug] = client
-	return true
-}
-
-func (s *Session) Close() error {
-	if s.Listener != nil {
-		err := s.Listener.Close()
+func (s *SSHSession) Close() error {
+	if s.forwarder.Listener != nil {
+		err := s.forwarder.Listener.Close()
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			return err
 		}
 	}
 
-	if s.ConnChannel != nil {
-		err := s.ConnChannel.Close()
+	if s.channel != nil {
+		err := s.channel.Close()
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 	}
 
-	if s.Connection != nil {
-		err := s.Connection.Close()
+	if s.Conn != nil {
+		err := s.Conn.Close()
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			return err
 		}
 	}
 
-	if s.Slug != "" {
-		unregisterClient(s.Slug)
+	slug := s.forwarder.getSlug()
+	if slug != "" {
+		unregisterClient(slug)
 	}
 
-	if s.TunnelType == TCP {
-		err := portUtil.Manager.SetPortStatus(s.ForwardedPort, false)
+	if s.forwarder.TunnelType == TCP && s.forwarder.Listener != nil {
+		err := portUtil.Manager.SetPortStatus(s.forwarder.ForwardedPort, false)
 		if err != nil {
 			return err
 		}
@@ -111,7 +92,7 @@ func (s *Session) Close() error {
 	return nil
 }
 
-func (s *Session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
+func (s *SSHSession) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 	for req := range GlobalRequest {
 		switch req.Type {
 		case "tcpip-forward":
@@ -126,7 +107,7 @@ func (s *Session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 	}
 }
 
-func (s *Session) handleTCPIPForward(req *ssh.Request) {
+func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 	log.Println("Port forwarding request detected")
 
 	reader := bytes.NewReader(req.Payload)
@@ -135,39 +116,50 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 	if err != nil {
 		log.Println("Failed to read address from payload:", err)
 		req.Reply(false, nil)
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			log.Printf("failed to close session: %v", err)
+		}
 		return
 	}
 
 	var rawPortToBind uint32
 	if err := binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
 		log.Println("Failed to read port from payload:", err)
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
 		req.Reply(false, nil)
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			log.Printf("failed to close session: %v", err)
+		}
 		return
 	}
 
 	if rawPortToBind > 65535 {
-		s.sendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
 		req.Reply(false, nil)
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			log.Printf("failed to close session: %v", err)
+		}
 		return
 	}
 
 	portToBind := uint16(rawPortToBind)
 
 	if isBlockedPort(portToBind) {
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
 		req.Reply(false, nil)
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			log.Printf("failed to close session: %v", err)
+		}
 		return
 	}
 
-	s.sendMessage("\033[H\033[2J")
-	s.Status = RUNNING
-	showWelcomeMessage(s.ConnChannel)
-	go s.handleUserInput()
+	s.interaction.SendMessage("\033[H\033[2J")
+	s.lifecycle.Status = RUNNING
+	go s.interaction.HandleUserInput()
 
 	if portToBind == 80 || portToBind == 443 {
 		s.handleHTTPForward(req, portToBind)
@@ -177,15 +169,21 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 			unassign, success := portUtil.Manager.GetUnassignedPort()
 			portToBind = unassign
 			if !success {
-				s.sendMessage(fmt.Sprintf("No available port\r\n", portToBind))
+				s.interaction.SendMessage(fmt.Sprintf("No available port\r\n", portToBind))
 				req.Reply(false, nil)
-				s.Close()
+				err := s.Close()
+				if err != nil {
+					log.Printf("failed to close session: %v", err)
+				}
 				return
 			}
-		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); !isExist || isUse {
-			s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
+		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); isExist || isUse {
+			s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
 			req.Reply(false, nil)
-			s.Close()
+			err := s.Close()
+			if err != nil {
+				log.Printf("failed to close session: %v", err)
+			}
 			return
 		}
 		portUtil.Manager.SetPortStatus(portToBind, true)
@@ -210,17 +208,17 @@ func isBlockedPort(port uint16) bool {
 	return false
 }
 
-func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint16) {
-	s.TunnelType = HTTP
-	s.ForwardedPort = uint16(portToBind)
+func (s *SSHSession) handleHTTPForward(req *ssh.Request, portToBind uint16) {
+	s.forwarder.TunnelType = HTTP
+	s.forwarder.ForwardedPort = portToBind
 
-	slug := s.generateUniqueSlug()
+	slug := generateUniqueSlug()
 	if slug == "" {
 		req.Reply(false, nil)
 		return
 	}
 
-	s.Slug = slug
+	s.forwarder.setSlug(slug)
 	registerClient(slug, s)
 
 	buf := new(bytes.Buffer)
@@ -233,24 +231,29 @@ func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint16) {
 		protocol = "https"
 	}
 
-	s.sendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
+	s.interaction.ShowWelcomeMessage()
+	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
 	req.Reply(true, buf.Bytes())
 }
 
-func (s *Session) handleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
-	s.TunnelType = TCP
+func (s *SSHSession) handleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
+	s.forwarder.TunnelType = TCP
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
 		req.Reply(false, nil)
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			log.Printf("failed to close session: %v", err)
+		}
 		return
 	}
-	s.Listener = listener
-	s.ForwardedPort = uint16(portToBind)
-	s.sendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", s.TunnelType, utils.Getenv("domain"), s.ForwardedPort))
+	s.forwarder.Listener = listener
+	s.forwarder.ForwardedPort = portToBind
+	s.interaction.ShowWelcomeMessage()
+	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", s.forwarder.TunnelType, utils.Getenv("domain"), s.forwarder.ForwardedPort))
 
 	go s.acceptTCPConnections()
 
@@ -260,9 +263,9 @@ func (s *Session) handleTCPForward(req *ssh.Request, addr string, portToBind uin
 	req.Reply(true, buf.Bytes())
 }
 
-func (s *Session) acceptTCPConnections() {
+func (s *SSHSession) acceptTCPConnections() {
 	for {
-		conn, err := s.Listener.Accept()
+		conn, err := s.forwarder.Listener.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
@@ -274,11 +277,11 @@ func (s *Session) acceptTCPConnections() {
 		go s.HandleForwardedConnection(UserConnection{
 			Reader: nil,
 			Writer: conn,
-		}, s.Connection)
+		}, s.Conn)
 	}
 }
 
-func (s *Session) generateUniqueSlug() string {
+func generateUniqueSlug() string {
 	maxAttempts := 5
 
 	for i := 0; i < maxAttempts; i++ {
@@ -297,7 +300,7 @@ func (s *Session) generateUniqueSlug() string {
 	return ""
 }
 
-func (s *Session) waitForRunningStatus() {
+func (s *SSHSession) waitForRunningStatus() {
 	timeout := time.After(3 * time.Second)
 	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
@@ -306,93 +309,21 @@ func (s *Session) waitForRunningStatus() {
 	for {
 		select {
 		case <-ticker.C:
-			s.sendMessage(fmt.Sprintf("\rLoading %s", frames[i]))
+			s.interaction.SendMessage(fmt.Sprintf("\rLoading %s", frames[i]))
 			i = (i + 1) % len(frames)
-			if s.Status == RUNNING {
+			if s.lifecycle.Status == RUNNING {
+				s.interaction.SendMessage("\r\033[K")
 				return
 			}
 		case <-timeout:
-			s.sendMessage("\r\033[K")
-			s.sendMessage("TCP/IP request not received in time.\r\nCheck your internet connection and confirm the server responds within 3000ms.\r\nEnsure you ran the correct command. For more details, visit https://tunnl.live.\r\n\r\n")
-			s.Close()
+			s.interaction.SendMessage("\r\033[K")
+			s.interaction.SendMessage("TCP/IP request not received in time.\r\nCheck your internet connection and confirm the server responds within 3000ms.\r\nEnsure you ran the correct command. For more details, visit https://tunnl.live.\r\n\r\n")
+			err := s.Close()
+			if err != nil {
+				log.Printf("failed to close session: %v", err)
+			}
 			log.Println("Timeout waiting for session to start running")
 			return
-		}
-	}
-}
-
-func (s *Session) sendMessage(message string) {
-	if s.ConnChannel != nil {
-		s.ConnChannel.Write([]byte(message))
-	}
-}
-
-func (s *Session) handleUserInput() {
-	var commandBuffer bytes.Buffer
-	buf := make([]byte, 1)
-	inSlugEditMode := false
-	editSlug := s.Slug
-
-	for {
-		n, err := s.ConnChannel.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading from client: %s", err)
-			}
-			break
-		}
-
-		if n > 0 {
-			char := buf[0]
-
-			if inSlugEditMode {
-				s.handleSlugEditMode(s.ConnChannel, &inSlugEditMode, &editSlug, char, &commandBuffer)
-				continue
-			}
-
-			s.ConnChannel.Write(buf[:n])
-
-			if char == 8 || char == 127 {
-				if commandBuffer.Len() > 0 {
-					commandBuffer.Truncate(commandBuffer.Len() - 1)
-					s.ConnChannel.Write([]byte("\b \b"))
-				}
-				continue
-			}
-
-			if char == '/' {
-				commandBuffer.Reset()
-				commandBuffer.WriteByte(char)
-				continue
-			}
-
-			if commandBuffer.Len() > 0 {
-				if char == 13 {
-					s.handleCommand(s.ConnChannel, commandBuffer.String(), &inSlugEditMode, &editSlug, &commandBuffer)
-					continue
-				}
-				commandBuffer.WriteByte(char)
-			}
-		}
-	}
-}
-
-func (s *Session) handleSlugEditMode(connection ssh.Channel, inSlugEditMode *bool, editSlug *string, char byte, commandBuffer *bytes.Buffer) {
-	if char == 13 {
-		s.handleSlugSave(connection, inSlugEditMode, editSlug, commandBuffer)
-	} else if char == 27 {
-		s.handleSlugCancel(connection, inSlugEditMode, commandBuffer)
-	} else if char == 8 || char == 127 {
-		if len(*editSlug) > 0 {
-			*editSlug = (*editSlug)[:len(*editSlug)-1]
-			connection.Write([]byte("\r\033[K"))
-			connection.Write([]byte("➤ " + *editSlug + "." + utils.Getenv("domain")))
-		}
-	} else if char >= 32 && char <= 126 {
-		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
-			*editSlug += string(char)
-			connection.Write([]byte("\r\033[K"))
-			connection.Write([]byte("➤ " + *editSlug + "." + utils.Getenv("domain")))
 		}
 	}
 }
@@ -404,77 +335,6 @@ func isForbiddenSlug(slug string) bool {
 		}
 	}
 	return false
-}
-
-func (s *Session) handleSlugSave(connection ssh.Channel, inSlugEditMode *bool, editSlug *string, commandBuffer *bytes.Buffer) {
-	isValid := isValidSlug(*editSlug)
-
-	connection.Write([]byte("\033[H\033[2J"))
-
-	if !isValid {
-		oldSlug := s.Slug
-		newSlug := *editSlug
-
-		if !updateClientSlug(oldSlug, newSlug) {
-			handleSlugUpdateError(connection, s)
-			return
-		}
-
-		connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
-		connection.Write([]byte("Your new address is: " + newSlug + "." + utils.Getenv("domain") + "\r\n\r\n"))
-		connection.Write([]byte("Press any key to continue...\r\n"))
-	} else if isForbiddenSlug(*editSlug) {
-		connection.Write([]byte("\r\n\r\n❌ FORBIDDEN SUBDOMAIN ❌\r\n\r\n"))
-		connection.Write([]byte("This subdomain is not allowed.\r\n"))
-		connection.Write([]byte("Please try a different subdomain.\r\n\r\n"))
-		connection.Write([]byte("Press any key to continue...\r\n"))
-	} else {
-		connection.Write([]byte("\r\n\r\n❌ INVALID SUBDOMAIN ❌\r\n\r\n"))
-		connection.Write([]byte("Use only lowercase letters, numbers, and hyphens.\r\n"))
-		connection.Write([]byte("Length must be 3-20 characters and cannot start or end with a hyphen.\r\n\r\n"))
-		connection.Write([]byte("Press any key to continue...\r\n"))
-	}
-
-	waitForKeyPress(connection)
-
-	connection.Write([]byte("\033[H\033[2J"))
-	showWelcomeMessage(connection)
-
-	domain := utils.Getenv("domain")
-	protocol := "http"
-	if utils.Getenv("tls_enabled") == "true" {
-		protocol = "https"
-	}
-	connection.Write([]byte(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, s.Slug, domain)))
-
-	*inSlugEditMode = false
-	commandBuffer.Reset()
-}
-
-func (s *Session) handleSlugCancel(connection ssh.Channel, inSlugEditMode *bool, commandBuffer *bytes.Buffer) {
-	*inSlugEditMode = false
-	connection.Write([]byte("\033[H\033[2J"))
-	connection.Write([]byte("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n"))
-	connection.Write([]byte("Press any key to continue...\r\n"))
-
-	waitForKeyPress(connection)
-
-	connection.Write([]byte("\033[H\033[2J"))
-	showWelcomeMessage(connection)
-
-	commandBuffer.Reset()
-}
-
-func handleSlugUpdateError(connection ssh.Channel, s *Session) {
-	connection.Write([]byte("\r\n\r\n❌ SERVER ERROR ❌\r\n\r\n"))
-	connection.Write([]byte("Failed to update subdomain. You will be disconnected in 5 seconds.\r\n\r\n"))
-
-	for i := 5; i > 0; i-- {
-		connection.Write([]byte(fmt.Sprintf("Disconnecting in %d...\r\n", i)))
-		time.Sleep(1 * time.Second)
-	}
-
-	s.Close()
 }
 
 func isValidSlug(slug string) bool {
@@ -505,47 +365,7 @@ func waitForKeyPress(connection ssh.Channel) {
 	}
 }
 
-func (s *Session) handleCommand(connection ssh.Channel, command string, inSlugEditMode *bool, editSlug *string, commandBuffer *bytes.Buffer) {
-	switch command {
-	case "/bye":
-		connection.Write([]byte("\r\nClosing connection..."))
-		s.Close()
-	case "/debug":
-		log.Println("Client registry:", Clients)
-	case "/help":
-		connection.Write([]byte("\r\nAvailable commands: /bye, /help, /clear, /slug"))
-	case "/clear":
-		connection.Write([]byte("\033[H\033[2J"))
-		showWelcomeMessage(s.ConnChannel)
-		domain := utils.Getenv("domain")
-		if s.TunnelType == HTTP {
-			protocol := "http"
-			if utils.Getenv("tls_enabled") == "true" {
-				protocol = "https"
-			}
-			s.sendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, s.Slug, domain))
-		} else {
-			s.sendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", s.TunnelType, domain, s.ForwardedPort))
-		}
-
-	case "/slug":
-		if s.TunnelType != HTTP {
-			connection.Write([]byte(fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains", s.TunnelType)))
-		} else {
-			*inSlugEditMode = true
-			*editSlug = s.Slug
-			connection.Write([]byte("\033[H\033[2J"))
-			displaySlugEditor(connection, s.Slug)
-			connection.Write([]byte("➤ " + *editSlug + "." + utils.Getenv("domain")))
-		}
-	default:
-		connection.Write([]byte("\r\nUnknown command"))
-	}
-
-	commandBuffer.Reset()
-}
-
-func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.ServerConn) {
+func (s *SSHSession) HandleForwardedConnection(conn UserConnection, sshConn *ssh.ServerConn) {
 	defer conn.Writer.Close()
 
 	log.Printf("Handling new forwarded connection from %s", conn.Writer.RemoteAddr())
@@ -553,7 +373,7 @@ func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.Se
 
 	timestamp := time.Now().Format("02/Jan/2006 15:04:05")
 
-	payload := createForwardedTCPIPPayload(host, uint16(originPort), s.ForwardedPort)
+	payload := createForwardedTCPIPPayload(host, uint16(originPort), s.forwarder.ForwardedPort)
 	channel, reqs, err := sshConn.OpenChannel("forwarded-tcpip", payload)
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
@@ -606,26 +426,26 @@ func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.Se
 	select {
 	case err := <-peekChan:
 		if err == io.EOF {
-			s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType))
+			s.interaction.SendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.forwarder.TunnelType))
 			sendBadGatewayResponse(conn.Writer)
 			return
 		}
 		if err != nil {
 			log.Printf("Error peeking channel data: %v", err)
-			s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType))
+			s.interaction.SendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.forwarder.TunnelType))
 			sendBadGatewayResponse(conn.Writer)
 			return
 		}
 	case <-time.After(5 * time.Second):
 		log.Printf("Timeout waiting for channel data from %s", conn.Writer.RemoteAddr())
-		s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType))
+		s.interaction.SendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.forwarder.TunnelType))
 		sendBadGatewayResponse(conn.Writer)
 		return
 	case <-ctx.Done():
 		return
 	}
 
-	s.sendMessage(fmt.Sprintf("\033[32m%s -> [%s] TUNNEL ADDRESS -- \"%s\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType, timestamp))
+	s.interaction.SendMessage(fmt.Sprintf("\033[32m%s -> [%s] TUNNEL ADDRESS -- \"%s\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.forwarder.TunnelType, timestamp))
 
 	_, err = io.Copy(conn.Writer, reader)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -639,79 +459,6 @@ func sendBadGatewayResponse(writer io.Writer) {
 		"Content-Type: text/plain\r\n\r\n" +
 		"Bad Gateway"
 	io.Copy(writer, bytes.NewReader([]byte(response)))
-}
-
-func showWelcomeMessage(connection ssh.Channel) {
-	asciiArt := []string{
-		` _______                     _   _____  _      `,
-		`|__   __|                   | | |  __ \| |    `,
-		`   | |_   _ _ __  _ __   ___| | | |__) | |___ `,
-		`   | | | | | '_ \| '_ \ / _ \ | |  ___/| / __|`,
-		`   | | |_| | | | | | | |  __/ | | |    | \__ \`,
-		`   |_|\__,_|_| |_|_| |_|\___|_| |_|    |_|___/`,
-		``,
-		`       "Tunnel Pls" - Project by Bagas`,
-		`           https://fossy.my.id`,
-		``,
-		`        Welcome to Tunnel! Available commands:`,
-		`        - '/bye'   : Exit the tunnel`,
-		`        - '/help'  : Show this help message`,
-		`        - '/clear' : Clear the current line`,
-		`        - '/slug'  : Set custom subdomain`,
-	}
-
-	for _, line := range asciiArt {
-		connection.Write([]byte("\r\n" + line))
-	}
-	connection.Write([]byte("\r\n\r\n"))
-}
-
-func displaySlugEditor(connection ssh.Channel, currentSlug string) {
-	domain := utils.Getenv("domain")
-	fullDomain := currentSlug + "." + domain
-
-	const paddingRight = 4
-
-	contentLine := "  ║  Current:  " + fullDomain
-	boxWidth := len(contentLine) + paddingRight + 1
-	if boxWidth < 50 {
-		boxWidth = 50
-	}
-
-	topBorder := "  ╔" + strings.Repeat("═", boxWidth-4) + "╗\r\n"
-	title := centerText("SUBDOMAIN EDITOR", boxWidth-4)
-	header := "  ║" + title + "║\r\n"
-	midBorder := "  ╠" + strings.Repeat("═", boxWidth-4) + "╣\r\n"
-	emptyLine := "  ║" + strings.Repeat(" ", boxWidth-4) + "║\r\n"
-
-	currentLineContent := fmt.Sprintf("  ║  Current:  %s", fullDomain)
-	currentLine := currentLineContent + strings.Repeat(" ", boxWidth-len(currentLineContent)+1) + "║\r\n"
-
-	newLine := "  ║  New:" + strings.Repeat(" ", boxWidth-10) + "║\r\n"
-	saveCancel := "  ║  [Enter] Save  |  [Esc] Cancel" + strings.Repeat(" ", boxWidth-35) + "║\r\n"
-	bottomBorder := "  ╚" + strings.Repeat("═", boxWidth-4) + "╝\r\n"
-
-	connection.Write([]byte("\r\n\r\n"))
-	connection.Write([]byte(topBorder))
-	connection.Write([]byte(header))
-	connection.Write([]byte(midBorder))
-	connection.Write([]byte(emptyLine))
-	connection.Write([]byte(currentLine))
-	connection.Write([]byte(emptyLine))
-	connection.Write([]byte(newLine))
-	connection.Write([]byte(emptyLine))
-	connection.Write([]byte(midBorder))
-	connection.Write([]byte(saveCancel))
-	connection.Write([]byte(bottomBorder))
-	connection.Write([]byte("\r\n\r\n"))
-}
-
-func centerText(text string, width int) string {
-	padding := (width - len(text)) / 2
-	if padding < 0 {
-		padding = 0
-	}
-	return strings.Repeat(" ", padding) + text + strings.Repeat(" ", width-len(text)-padding)
 }
 
 func writeSSHString(buffer *bytes.Buffer, str string) {
