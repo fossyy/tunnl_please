@@ -74,9 +74,6 @@ func (pm *PortManager) SetPortStatus(port uint16, assigned bool) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if _, exists := pm.ports[port]; !exists {
-		return fmt.Errorf("port %d already in use", port)
-	}
 	pm.ports[port] = assigned
 	return nil
 }
