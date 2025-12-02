@@ -36,6 +36,9 @@ func (cw *CustomWriter) Read(p []byte) (int, error) {
 		return 0, errors.New("can not read from nil CustomWriter")
 	}
 	read, err := cw.reader.Read(p)
+	if err != nil {
+		return 0, err
+	}
 	reader := bytes.NewReader(p)
 	reqhf, err := NewRequestHeaderFactory(reader)
 	if err != nil {
@@ -261,11 +264,6 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 	}(channel)
 
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("Panic in request handler: %v", r)
-			}
-		}()
 		for req := range reqs {
 			err := req.Reply(false, nil)
 			if err != nil {
