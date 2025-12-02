@@ -7,12 +7,9 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"strings"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
-
-	"github.com/gorilla/websocket"
 )
 
 func NewHTTPSServer() error {
@@ -57,17 +54,9 @@ func HandlerTLS(conn net.Conn) {
 	dstReader := bufio.NewReader(conn)
 	reqhf, err := NewRequestHeaderFactory(dstReader)
 	if err != nil {
+		log.Printf("Error creating request header: %v", err)
 		return
 	}
-	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
-
-	// Initial Requests
-	cw.Requests = append(cw.Requests, &RequestContext{
-		Host:    reqhf.Get("Host"),
-		Path:    reqhf.Path,
-		Method:  reqhf.Method,
-		Chunked: false,
-	})
 
 	host := strings.Split(reqhf.Get("Host"), ".")
 	if len(host) < 1 {
@@ -87,34 +76,18 @@ func HandlerTLS(conn net.Conn) {
 	slug := host[0]
 
 	if slug == "ping" {
-		req, err := http.ReadRequest(dstReader)
+		// TODO: implement cors
+		_, err := conn.Write([]byte(
+			"HTTP/1.1 200 OK\r\n" +
+				"Content-Length: 0\r\n" +
+				"Connection: close\r\n" +
+				"Access-Control-Allow-Origin: *\r\n" +
+				"Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
+				"Access-Control-Allow-Headers: *\r\n" +
+				"\r\n",
+		))
 		if err != nil {
-			log.Println("failed to parse HTTP request:", err)
-			return
-		}
-		rw := &connResponseWriter{conn: conn}
-
-		wsConn, err := upgrader.Upgrade(rw, req, nil)
-		if err != nil {
-			if !strings.Contains(err.Error(), "the client is not using the websocket protocol") {
-				log.Println("Upgrade failed:", err)
-			}
-			err := conn.Close()
-			if err != nil {
-				log.Println("failed to close connection:", err)
-				return
-			}
-			return
-		}
-
-		err = wsConn.WriteMessage(websocket.TextMessage, []byte("pong"))
-		if err != nil {
-			log.Println("failed to write pong:", err)
-			return
-		}
-		err = wsConn.Close()
-		if err != nil {
-			log.Println("websocket close failed :", err)
+			log.Println("Failed to write 200 OK:", err)
 			return
 		}
 		return
@@ -138,6 +111,15 @@ func HandlerTLS(conn net.Conn) {
 		}
 		return
 	}
+	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
+
+	// Initial Requests
+	cw.Requests = append(cw.Requests, &RequestContext{
+		Host:    reqhf.Get("Host"),
+		Path:    reqhf.Path,
+		Method:  reqhf.Method,
+		Chunked: false,
+	})
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }

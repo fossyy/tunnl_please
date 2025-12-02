@@ -299,6 +299,7 @@ func Handler(conn net.Conn) {
 	dstReader := bufio.NewReader(conn)
 	reqhf, err := NewRequestHeaderFactory(dstReader)
 	if err != nil {
+		log.Printf("Error creating request header: %v", err)
 		return
 	}
 
