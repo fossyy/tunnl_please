@@ -9,7 +9,6 @@ import (
 	"log"
 	"net"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 	"tunnel_pls/session"
@@ -29,35 +28,14 @@ type CustomWriter struct {
 	reader      io.Reader
 	headerBuf   []byte
 	buf         []byte
-	Requests    []*RequestContext
 	interaction *session.Interaction
-}
-
-type RequestContext struct {
-	Host        string
-	Path        string
-	Method      string
-	Chunked     bool
-	Tail        []byte
-	ContentSize int
-	Written     int
 }
 
 func (cw *CustomWriter) Read(p []byte) (int, error) {
 	read, err := cw.reader.Read(p)
-	test := bytes.NewReader(p)
-	reqhf, _ := NewRequestHeaderFactory(test)
-	if reqhf != nil {
-		cw.Requests = append(cw.Requests, &RequestContext{
-			Host:        reqhf.Get("Host"),
-			Path:        reqhf.Path,
-			Method:      reqhf.Method,
-			Chunked:     false,
-			Tail:        make([]byte, 5),
-			ContentSize: 0,
-			Written:     0,
-		})
-	}
+	reader := bytes.NewReader(p)
+	reqhf, _ := NewRequestHeaderFactory(reader)
+	cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), cw.RemoteAddr.String(), reqhf.Method, reqhf.Path))
 	return read, err
 }
 
@@ -102,7 +80,6 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 	}
 
 	cw.buf = append(cw.buf, p...)
-	timestamp := time.Now().UTC().Format(time.RFC3339)
 	// TODO: implement middleware buat cache system dll
 	if idx := bytes.Index(cw.buf, DELIMITER); idx != -1 {
 		header := cw.buf[:idx+len(DELIMITER)]
@@ -111,21 +88,6 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 		if isHTTPHeader(header) {
 			resphf := NewResponseHeaderFactory(header)
 			resphf.Set("Server", "Tunnel Please")
-
-			if resphf.Get("Transfer-Encoding") == "chunked" {
-				cw.Requests[0].Chunked = true
-			}
-			if resphf.Get("Content-Length") != "" {
-				bodySize, err := strconv.Atoi(resphf.Get("Content-Length"))
-				if err != nil {
-					log.Printf("Error parsing Content-Length: %v", err)
-					cw.Requests[0].ContentSize = -1
-				} else {
-					cw.Requests[0].ContentSize = bodySize
-				}
-			} else {
-				cw.Requests[0].ContentSize = -1
-			}
 
 			header = resphf.Finalize()
 			_, err := cw.writer.Write(header)
@@ -139,22 +101,6 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 					return 0, err
 				}
 			}
-			req := cw.Requests[0]
-			req.Written += len(body)
-			if req.Chunked {
-				req.Tail = append(req.Tail, p[len(p)-5:]...)
-				if bytes.Contains(p, []byte("0\r\n\r\n")) {
-					cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", timestamp, cw.RemoteAddr.String(), req.Method, req.Path))
-				}
-			} else if req.ContentSize != -1 {
-				if req.Written >= req.ContentSize {
-					cw.Requests = cw.Requests[1:]
-					cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", timestamp, cw.RemoteAddr.String(), req.Method, req.Path))
-				}
-			} else {
-				cw.Requests = cw.Requests[1:]
-				cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", timestamp, cw.RemoteAddr.String(), req.Method, req.Path))
-			}
 			cw.buf = nil
 			return len(p), nil
 		}
@@ -165,24 +111,6 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 		return n, err
 	}
 
-	req := cw.Requests[0]
-	req.Written += n
-	if req.Chunked {
-		req.Tail = append(req.Tail, p[len(p)-5:]...)
-		if bytes.Contains(p, []byte("0\r\n\r\n")) {
-			cw.Requests = cw.Requests[1:]
-			cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", timestamp, cw.RemoteAddr.String(), req.Method, req.Path))
-		}
-	} else if req.ContentSize != -1 {
-		if req.Written >= req.ContentSize {
-			cw.Requests = cw.Requests[1:]
-			cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", timestamp, cw.RemoteAddr.String(), req.Method, req.Path))
-		}
-
-	} else {
-		cw.Requests = cw.Requests[1:]
-		cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", timestamp, cw.RemoteAddr.String(), req.Method, req.Path))
-	}
 	return n, nil
 }
 
@@ -297,13 +225,6 @@ func Handler(conn net.Conn) {
 	}
 	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
-	// Initial Requests
-	cw.Requests = append(cw.Requests, &RequestContext{
-		Host:    reqhf.Get("Host"),
-		Path:    reqhf.Path,
-		Method:  reqhf.Method,
-		Chunked: false,
-	})
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }
@@ -350,6 +271,8 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 		log.Printf("Failed to forward request: %v", err)
 		return
 	}
+
+	cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), cw.RemoteAddr.String(), initialRequest.Method, initialRequest.Path))
 
 	sshSession.HandleForwardedConnection(cw, channel, cw.RemoteAddr)
 	return

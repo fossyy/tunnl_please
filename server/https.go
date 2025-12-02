@@ -113,13 +113,6 @@ func HandlerTLS(conn net.Conn) {
 	}
 	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
-	// Initial Requests
-	cw.Requests = append(cw.Requests, &RequestContext{
-		Host:    reqhf.Get("Host"),
-		Path:    reqhf.Path,
-		Method:  reqhf.Method,
-		Chunked: false,
-	})
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }
