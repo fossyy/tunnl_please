@@ -371,7 +371,7 @@ func updateClientSlug(oldSlug, newSlug string) bool {
 	}
 
 	delete(Clients, oldSlug)
-	client.forwarder.setSlug(newSlug)
+	client.Forwarder.setSlug(newSlug)
 	Clients[newSlug] = client
 	return true
 }

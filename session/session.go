@@ -49,7 +49,6 @@ type ForwardingController interface {
 	HandleHTTPForward(req *ssh.Request, port uint16)
 	HandleTCPForward(req *ssh.Request, addr string, port uint16)
 	AcceptTCPConnections()
-	HandleForwardedConnection(conn UserConnection, sshConn *ssh.ServerConn)
 }
 
 type Session interface {
@@ -98,9 +97,9 @@ type Interaction struct {
 	forwarder ForwarderInfo
 }
 type SSHSession struct {
-	lifecycle   *Lifecycle
-	interaction *Interaction
-	forwarder   *Forwarder
+	Lifecycle   *Lifecycle
+	Interaction *Interaction
+	Forwarder   *Forwarder
 
 	Conn    *ssh.ServerConn
 	channel ssh.Channel
@@ -111,10 +110,10 @@ type SSHSession struct {
 
 func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel) {
 	session := SSHSession{
-		lifecycle: &Lifecycle{
+		Lifecycle: &Lifecycle{
 			Status: INITIALIZING,
 		},
-		interaction: &Interaction{
+		Interaction: &Interaction{
 			CommandBuffer: new(bytes.Buffer),
 			EditMode:      false,
 			EditSlug:      "",
@@ -124,7 +123,7 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 			session:       nil,
 			forwarder:     nil,
 		},
-		forwarder: &Forwarder{
+		Forwarder: &Forwarder{
 			Listener:      nil,
 			TunnelType:    "",
 			ForwardedPort: 0,
@@ -136,12 +135,12 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		slug:    "",
 	}
 
-	session.forwarder.getSlug = session.GetSlug
-	session.forwarder.setSlug = session.SetSlug
-	session.interaction.getSlug = session.GetSlug
-	session.interaction.setSlug = session.SetSlug
-	session.interaction.session = &session
-	session.interaction.forwarder = session.forwarder
+	session.Forwarder.getSlug = session.GetSlug
+	session.Forwarder.setSlug = session.SetSlug
+	session.Interaction.getSlug = session.GetSlug
+	session.Interaction.setSlug = session.SetSlug
+	session.Interaction.session = &session
+	session.Interaction.forwarder = session.Forwarder
 
 	go func() {
 		go session.waitForRunningStatus()
@@ -150,8 +149,8 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 			ch, reqs, _ := channel.Accept()
 			if session.channel == nil {
 				session.channel = ch
-				session.interaction.channel = ch
-				session.lifecycle.Status = SETUP
+				session.Interaction.channel = ch
+				session.Lifecycle.Status = SETUP
 				go session.HandleGlobalRequest(forwardingReq)
 			}
 			go session.HandleGlobalRequest(reqs)

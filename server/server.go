@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"tunnel_pls/utils"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type Server struct {
@@ -53,4 +57,42 @@ func (s *Server) Start() {
 
 		go s.handleConnection(conn)
 	}
+}
+
+func createForwardedTCPIPPayload(host string, originPort, port uint16) []byte {
+	var buf bytes.Buffer
+
+	writeSSHString(&buf, "localhost")
+	err := binary.Write(&buf, binary.BigEndian, uint32(port))
+	if err != nil {
+		log.Printf("Failed to write string to buffer: %v", err)
+		return nil
+	}
+	writeSSHString(&buf, host)
+	err = binary.Write(&buf, binary.BigEndian, uint32(originPort))
+	if err != nil {
+		log.Printf("Failed to write string to buffer: %v", err)
+		return nil
+	}
+
+	return buf.Bytes()
+}
+
+func writeSSHString(buffer *bytes.Buffer, str string) {
+	err := binary.Write(buffer, binary.BigEndian, uint32(len(str)))
+	if err != nil {
+		log.Printf("Failed to write string to buffer: %v", err)
+		return
+	}
+	buffer.WriteString(str)
+}
+
+func ParseAddr(addr string) (string, uint32) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Printf("Failed to parse origin address: %s from address %s", err.Error(), addr)
+		return "0.0.0.0", uint32(0)
+	}
+	port, _ := strconv.Atoi(portStr)
+	return host, uint32(port)
 }

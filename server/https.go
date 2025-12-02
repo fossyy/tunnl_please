@@ -45,14 +45,31 @@ func NewHTTPSServer() error {
 }
 
 func HandlerTLS(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	headers, err := peekUntilHeaders(reader, 8192)
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing connection: %v", err)
+			return
+		}
+		return
+	}()
+
+	dstReader := bufio.NewReader(conn)
+	reqhf, err := NewRequestHeaderFactory(dstReader)
 	if err != nil {
-		log.Println("Failed to peek headers:", err)
 		return
 	}
+	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
-	host := strings.Split(parseHostFromHeader(headers), ".")
+	// Initial Requests
+	cw.Requests = append(cw.Requests, &RequestContext{
+		Host:    reqhf.Get("Host"),
+		Path:    reqhf.Path,
+		Method:  reqhf.Method,
+		Chunked: false,
+	})
+
+	host := strings.Split(reqhf.Get("Host"), ".")
 	if len(host) < 1 {
 		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
 		if err != nil {
@@ -70,7 +87,7 @@ func HandlerTLS(conn net.Conn) {
 	slug := host[0]
 
 	if slug == "ping" {
-		req, err := http.ReadRequest(reader)
+		req, err := http.ReadRequest(dstReader)
 		if err != nil {
 			log.Println("failed to parse HTTP request:", err)
 			return
@@ -121,10 +138,6 @@ func HandlerTLS(conn net.Conn) {
 		}
 		return
 	}
-
-	sshSession.HandleForwardedConnection(session.UserConnection{
-		Reader: reader,
-		Writer: conn,
-	}, sshSession.Conn)
+	forwardRequest(cw, reqhf, sshSession)
 	return
 }
