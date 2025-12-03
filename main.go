@@ -1,14 +1,20 @@
 package main
 
 import (
-	"golang.org/x/crypto/ssh"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"tunnel_pls/server"
 	"tunnel_pls/utils"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth:  true,
 		ServerVersion: "SSH-2.0-TunnlPls-1.0",

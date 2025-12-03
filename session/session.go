@@ -3,7 +3,6 @@ package session
 import (
 	"bytes"
 	"log"
-	"net"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -31,26 +30,6 @@ type SessionCloser interface {
 	Close() error
 }
 
-type InteractionController interface {
-	SendMessage(message string)
-	HandleUserInput()
-	HandleCommand(conn ssh.Channel, command string, inSlugEditMode *bool, editSlug *string, buf *bytes.Buffer)
-	HandleSlugEditMode(conn ssh.Channel, inSlugEditMode *bool, editSlug *string, char byte, buf *bytes.Buffer)
-	HandleSlugSave(conn ssh.Channel, inSlugEditMode *bool, editSlug *string, buf *bytes.Buffer)
-	HandleSlugCancel(conn ssh.Channel, inSlugEditMode *bool, buf *bytes.Buffer)
-	HandleSlugUpdateError()
-	ShowWelcomeMessage()
-	DisplaySlugEditor()
-}
-
-type ForwardingController interface {
-	HandleGlobalRequest(ch <-chan *ssh.Request)
-	HandleTCPIPForward(req *ssh.Request)
-	HandleHTTPForward(req *ssh.Request, port uint16)
-	HandleTCPForward(req *ssh.Request, addr string, port uint16)
-	AcceptTCPConnections()
-}
-
 type Session interface {
 	SessionLifecycle
 	InteractionController
@@ -61,41 +40,6 @@ type Lifecycle struct {
 	Status Status
 }
 
-type Forwarder struct {
-	Listener      net.Listener
-	TunnelType    TunnelType
-	ForwardedPort uint16
-
-	getSlug func() string
-	setSlug func(string)
-}
-
-type ForwarderInfo interface {
-	GetTunnelType() TunnelType
-	GetForwardedPort() uint16
-}
-
-func (f *Forwarder) GetTunnelType() TunnelType {
-	return f.TunnelType
-}
-
-func (f *Forwarder) GetForwardedPort() uint16 {
-	return f.ForwardedPort
-}
-
-type Interaction struct {
-	CommandBuffer *bytes.Buffer
-	EditMode      bool
-	EditSlug      string
-	channel       ssh.Channel
-
-	getSlug func() string
-	setSlug func(string)
-
-	session SessionCloser
-
-	forwarder ForwarderInfo
-}
 type SSHSession struct {
 	Lifecycle   *Lifecycle
 	Interaction *Interaction

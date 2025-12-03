@@ -12,6 +12,32 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type InteractionController interface {
+	SendMessage(message string)
+	HandleUserInput()
+	HandleCommand(conn ssh.Channel, command string, inSlugEditMode *bool, editSlug *string, buf *bytes.Buffer)
+	HandleSlugEditMode(conn ssh.Channel, inSlugEditMode *bool, editSlug *string, char byte, buf *bytes.Buffer)
+	HandleSlugSave(conn ssh.Channel, inSlugEditMode *bool, editSlug *string, buf *bytes.Buffer)
+	HandleSlugCancel(conn ssh.Channel, inSlugEditMode *bool, buf *bytes.Buffer)
+	HandleSlugUpdateError()
+	ShowWelcomeMessage()
+	DisplaySlugEditor()
+}
+
+type Interaction struct {
+	CommandBuffer *bytes.Buffer
+	EditMode      bool
+	EditSlug      string
+	channel       ssh.Channel
+
+	getSlug func() string
+	setSlug func(string)
+
+	session SessionCloser
+
+	forwarder ForwarderInfo
+}
+
 func (i *Interaction) SendMessage(message string) {
 	if i.channel != nil {
 		_, err := i.channel.Write([]byte(message))

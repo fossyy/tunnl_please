@@ -10,7 +10,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"time"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
 
@@ -28,27 +27,66 @@ type CustomWriter struct {
 	reader      io.Reader
 	headerBuf   []byte
 	buf         []byte
+	respHeader  *ResponseHeaderFactory
+	reqHeader   *RequestHeaderFactory
 	interaction *session.Interaction
+	respMW      []ResponseMiddleware
+	reqStartMW  []RequestMiddleware
+	reqEndMW    []RequestMiddleware
 }
 
 func (cw *CustomWriter) Read(p []byte) (int, error) {
-	if cw == nil {
-		return 0, errors.New("can not read from nil CustomWriter")
-	}
-	read, err := cw.reader.Read(p)
+	tmp := make([]byte, len(p))
+	read, err := cw.reader.Read(tmp)
 	if err != nil {
 		return 0, err
 	}
-	reader := bytes.NewReader(p)
-	reqhf, err := NewRequestHeaderFactory(reader)
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return read, io.EOF
+
+	tmp = tmp[:read]
+
+	idx := bytes.Index(tmp, DELIMITER)
+	if idx == -1 {
+		copy(p, tmp)
+		return read, nil
+	}
+
+	header := tmp[:idx+len(DELIMITER)]
+	body := tmp[idx+len(DELIMITER):]
+
+	if !isHTTPHeader(header) {
+		copy(p, tmp)
+		return read, nil
+	}
+
+	for _, m := range cw.reqEndMW {
+		err := m.HandleRequest(cw.reqHeader)
+		if err != nil {
+			log.Printf("Error when applying request middleware: %v", err)
+			return 0, err
 		}
+	}
+
+	headerReader := bufio.NewReader(bytes.NewReader(header))
+	reqhf, err := NewRequestHeaderFactory(headerReader)
+	if err != nil {
 		return 0, err
 	}
-	cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), cw.RemoteAddr.String(), reqhf.Method, reqhf.Path))
-	return read, err
+
+	for _, m := range cw.reqStartMW {
+		err := m.HandleRequest(reqhf)
+		if err != nil {
+			log.Printf("Error when applying request middleware: %v", err)
+			return 0, err
+		}
+	}
+
+	cw.reqHeader = reqhf
+	finalHeader := reqhf.Finalize()
+
+	n := copy(p, finalHeader)
+	n += copy(p[n:], body)
+
+	return n, nil
 }
 
 func NewCustomWriter(writer io.Writer, reader io.Reader, remoteAddr net.Addr) *CustomWriter {
@@ -99,9 +137,15 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 
 		if isHTTPHeader(header) {
 			resphf := NewResponseHeaderFactory(header)
-			resphf.Set("Server", "Tunnel Please")
-
+			for _, m := range cw.respMW {
+				err := m.HandleResponse(resphf, body)
+				if err != nil {
+					log.Printf("Cannot apply middleware: %s\n", err)
+					return 0, err
+				}
+			}
 			header = resphf.Finalize()
+			cw.respHeader = resphf
 			_, err := cw.writer.Write(header)
 			if err != nil {
 				return 0, err
@@ -117,12 +161,19 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 			return len(p), nil
 		}
 	}
+
 	cw.buf = nil
 	n, err := cw.writer.Write(p)
 	if err != nil {
 		return n, err
 	}
-
+	for _, m := range cw.respMW {
+		err := m.HandleResponse(cw.respHeader, p)
+		if err != nil {
+			log.Printf("Cannot apply middleware: %s\n", err)
+			return 0, err
+		}
+	}
 	return n, nil
 }
 
@@ -272,14 +323,28 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 			}
 		}
 	}()
-
 	_, err = channel.Write(initialRequest.Finalize())
 	if err != nil {
 		log.Printf("Failed to forward request: %v", err)
 		return
 	}
+	//TODO: Implement wrapper func buat add/remove middleware
+	fingerprintMiddleware := NewTunnelFingerprint()
+	loggerMiddleware := NewRequestLogger(cw.interaction, cw.RemoteAddr)
+	cw.respMW = append(cw.respMW, fingerprintMiddleware)
+	cw.reqStartMW = append(cw.reqStartMW, loggerMiddleware)
 
-	cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), cw.RemoteAddr.String(), initialRequest.Method, initialRequest.Path))
+	//TODO: Tambah req Middleware
+	cw.reqEndMW = nil
+	cw.reqHeader = initialRequest
+
+	for _, m := range cw.reqStartMW {
+		err := m.HandleRequest(cw.reqHeader)
+		if err != nil {
+			log.Printf("Error handling request: %v", err)
+			return
+		}
+	}
 
 	sshSession.HandleForwardedConnection(cw, channel, cw.RemoteAddr)
 	return
