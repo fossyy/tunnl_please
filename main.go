@@ -2,8 +2,6 @@ package main
 
 import (
 	"log"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"tunnel_pls/server"
 	"tunnel_pls/utils"
@@ -12,9 +10,6 @@ import (
 )
 
 func main() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth:  true,
 		ServerVersion: "SSH-2.0-TunnlPls-1.0",
