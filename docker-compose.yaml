@@ -1,0 +1,23 @@
+services:
+  tunnlpls:
+    image: git.fossy.my.id/bagas/tunnl_please:staging
+    ports:
+      - 80:80
+      - 2200:2200
+    volumes:
+      - ./certs:/certs
+#      - /etc/letsencrypt/live/sgp.tunnl.live/fullchain.pem:/certs/fullchain.pem
+#      - /etc/letsencrypt/live/sgp.tunnl.live/privkey.pem:/certs/privkey.pem
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    environment:
+      domain: sgp.tunnl.live
+      port: 2200
+      tls_enabled: true
+      tls_redirect: true
+      cert_loc: /certs/localhost.direct.SS.crt
+      key_loc: /certs/localhost.direct.SS.key
+      ssh_private_key: /certs/id_rsa
+      cors_list: https://tunnl.live
+      ALLOWED_PORTS: 10000-50000
+    restart: always

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"time"
-	"tunnel_pls/session/interaction"
 )
 
 type RequestMiddleware interface {
@@ -29,20 +28,22 @@ func (h *TunnelFingerprint) HandleResponse(header *ResponseHeaderFactory, body [
 }
 
 type RequestLogger struct {
-	interaction interaction.Controller
+	interaction Interaction
 	remoteAddr  net.Addr
 }
 
-func NewRequestLogger(interaction interaction.Controller, remoteAddr net.Addr) *RequestLogger {
+func NewRequestLogger(interaction Interaction, remoteAddr net.Addr) *RequestLogger {
 	return &RequestLogger{
 		interaction: interaction,
 		remoteAddr:  remoteAddr,
 	}
 }
+
 func (rl *RequestLogger) HandleRequest(header *RequestHeaderFactory) error {
 	rl.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), rl.remoteAddr.String(), header.Method, header.Path))
 	return nil
 }
+
 func (rl *RequestLogger) HandleResponse(header *ResponseHeaderFactory, body []byte) error { return nil }
 
 //TODO: Implement caching atau enggak

@@ -11,11 +11,13 @@ import (
 	"regexp"
 	"strings"
 	"tunnel_pls/session"
-	"tunnel_pls/session/interaction"
 	"tunnel_pls/types"
 	"tunnel_pls/utils"
 )
 
+type Interaction interface {
+	SendMessage(message string)
+}
 type CustomWriter struct {
 	RemoteAddr  net.Addr
 	writer      io.Writer
@@ -24,13 +26,13 @@ type CustomWriter struct {
 	buf         []byte
 	respHeader  *ResponseHeaderFactory
 	reqHeader   *RequestHeaderFactory
-	interaction interaction.Controller
+	interaction Interaction
 	respMW      []ResponseMiddleware
 	reqStartMW  []RequestMiddleware
 	reqEndMW    []RequestMiddleware
 }
 
-func (cw *CustomWriter) SetInteraction(interaction interaction.Controller) {
+func (cw *CustomWriter) SetInteraction(interaction Interaction) {
 	cw.interaction = interaction
 }
 
@@ -176,7 +178,7 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (cw *CustomWriter) AddInteraction(interaction *interaction.Interaction) {
+func (cw *CustomWriter) AddInteraction(interaction Interaction) {
 	cw.interaction = interaction
 }
 
