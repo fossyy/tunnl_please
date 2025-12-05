@@ -44,6 +44,7 @@ type Forwarder interface {
 }
 
 type Interaction struct {
+	InputLength      int
 	CommandBuffer    *bytes.Buffer
 	EditMode         bool
 	EditSlug         string
@@ -96,12 +97,17 @@ func (i *Interaction) HandleUserInput() {
 			i.SendMessage(string(buf[:n]))
 
 			if char == 8 || char == 127 {
+				if i.InputLength > 0 {
+					//i.CommandBuffer.Truncate(i.CommandBuffer.Len() - 1)
+					i.SendMessage("\b \b")
+				}
 				if i.CommandBuffer.Len() > 0 {
 					i.CommandBuffer.Truncate(i.CommandBuffer.Len() - 1)
-					i.SendMessage("\b \b")
 				}
 				continue
 			}
+
+			i.InputLength += n
 
 			if char == '/' {
 				i.CommandBuffer.Reset()
@@ -111,6 +117,7 @@ func (i *Interaction) HandleUserInput() {
 
 			if i.CommandBuffer.Len() > 0 {
 				if char == 13 {
+					i.SendMessage("\033[K")
 					i.HandleCommand(i.CommandBuffer.String())
 					continue
 				}
