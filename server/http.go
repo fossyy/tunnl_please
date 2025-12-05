@@ -298,8 +298,7 @@ func Handler(conn net.Conn) {
 }
 
 func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshSession *session.SSHSession) {
-	originHost, originPort := ParseAddr(cw.RemoteAddr.String())
-	payload := createForwardedTCPIPPayload(originHost, uint16(originPort), sshSession.Forwarder.GetForwardedPort())
+	payload := sshSession.Forwarder.CreateForwardedTCPIPPayload(cw.RemoteAddr)
 	channel, reqs, err := sshSession.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)

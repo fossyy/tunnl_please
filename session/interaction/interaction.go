@@ -324,7 +324,7 @@ func (i *Interaction) HandleCommand(command string) {
 			}
 			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
 		} else {
-			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", i.Forwarder.GetTunnelType(), domain, i.Forwarder.GetForwardedPort()))
+			i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.Forwarder.GetForwardedPort()))
 		}
 	case "/slug":
 		if i.Forwarder.GetTunnelType() != types.HTTP {

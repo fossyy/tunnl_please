@@ -212,7 +212,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.Forwarder.SetListener(listener)
 	s.Forwarder.SetForwardedPort(portToBind)
 	s.Interaction.ShowWelcomeMessage()
-	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", s.Forwarder.GetTunnelType(), utils.Getenv("domain"), s.Forwarder.GetForwardedPort()))
+	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("domain"), s.Forwarder.GetForwardedPort()))
 
 	go s.Forwarder.AcceptTCPConnections()
 
